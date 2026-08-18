@@ -9,10 +9,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version is stamped at build time via:
+//
+//	go build -ldflags "-X main.version=v1.2.3"
+var version = "dev"
+
 func main() {
 	root := &cobra.Command{
-		Use:   "dedi-cli",
-		Short: "Generate keys, sign, and verify DeDi protocol manifests and files",
+		Use:     "dedi-cli",
+		Short:   "Generate keys, sign, and verify DeDi protocol manifests and files",
+		Version: version,
 	}
 	root.AddCommand(newKeygenCmd())
 	root.AddCommand(newSignCmd())
