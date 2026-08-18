@@ -43,7 +43,7 @@ earlier files already written to --out remain on disk.`,
 
 			key, err := sign.LoadPrivateJWK(keyPath)
 			if err != nil {
-				return fmt.Errorf("load key: %w", err)
+				return fmt.Errorf(`load key: %w (--key should be a private key JSON file created by "dedi-cli keygen")`, err)
 			}
 			priv, err := key.PrivateKey()
 			if err != nil {

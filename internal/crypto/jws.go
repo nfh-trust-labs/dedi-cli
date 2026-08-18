@@ -77,7 +77,7 @@ func Verify(pub ed25519.PublicKey, payload []byte, jwsStr string) error {
 
 	signingInput := append([]byte(headerB64+"."), payload...)
 	if !ed25519.Verify(pub, signingInput, sig) {
-		return errors.New("verify: signature does not match payload")
+		return errors.New("verify: signature does not match payload (wrong key, or the document was modified after signing)")
 	}
 	return nil
 }

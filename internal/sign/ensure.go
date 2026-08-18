@@ -17,7 +17,7 @@ func EnsureManifestKey(m *protocol.Manifest, pub protocol.Key) error {
 			continue
 		}
 		if k != pub {
-			return fmt.Errorf("manifest already has a key %q that does not match the signing key", pub.Kid)
+			return fmt.Errorf("manifest already has a key %q that does not match the signing key (pass the matching --key, or remove/update that stale keys[] entry before signing)", pub.Kid)
 		}
 		return nil
 	}
@@ -35,7 +35,7 @@ func EnsurePublisherKey(f *protocol.DeDiFile, pub protocol.Key) error {
 		return nil
 	}
 	if f.Publisher.Key != pub {
-		return fmt.Errorf("publisher.key %q does not match the signing key %q", f.Publisher.Key.Kid, pub.Kid)
+		return fmt.Errorf("publisher.key %q does not match the signing key %q (pass the matching --key, or update publisher.key in the input before signing)", f.Publisher.Key.Kid, pub.Kid)
 	}
 	return nil
 }

@@ -56,7 +56,7 @@ already trust instead.`,
 				}
 				k, found := findKeyByKid(m.Keys, m.Proof.VerificationMethod)
 				if !found {
-					return fmt.Errorf("verification_method %q not found in manifest keys[]", m.Proof.VerificationMethod)
+					return fmt.Errorf("verification_method %q not found in manifest keys[] (the document may be malformed or was hand-edited after signing)", m.Proof.VerificationMethod)
 				}
 				embeddedKey, jws, kid = k, m.Proof.JWS, m.Proof.VerificationMethod
 			case documentKindDeDiFile:
@@ -65,7 +65,7 @@ already trust instead.`,
 					return fmt.Errorf("parse dedi file: %w", err)
 				}
 				if f.Proof.VerificationMethod != f.Publisher.Key.Kid {
-					return fmt.Errorf("verification_method %q does not match publisher.key.kid %q",
+					return fmt.Errorf("verification_method %q does not match publisher.key.kid %q (the document may be malformed or was hand-edited after signing)",
 						f.Proof.VerificationMethod, f.Publisher.Key.Kid)
 				}
 				embeddedKey, jws, kid = f.Publisher.Key, f.Proof.JWS, f.Publisher.Key.Kid
@@ -76,10 +76,10 @@ already trust instead.`,
 			if keyPath != "" {
 				raw, err := os.ReadFile(keyPath)
 				if err != nil {
-					return fmt.Errorf("read --key: %w", err)
+					return fmt.Errorf(`read --key: %w (--key should be a public JWK JSON file, e.g. the one "dedi-cli keygen" prints)`, err)
 				}
 				if err := json.Unmarshal(raw, &verifyKey); err != nil {
-					return fmt.Errorf("parse --key: %w", err)
+					return fmt.Errorf(`parse --key: %w (--key should be a public JWK JSON file, e.g. the one "dedi-cli keygen" prints)`, err)
 				}
 				usedTrustedKey = true
 			}

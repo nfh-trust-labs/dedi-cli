@@ -59,7 +59,7 @@ func (k PrivateJWK) PrivateKey() (ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("private jwk %q: decode x: %w", k.Kid, err)
 	}
 	if !priv.Public().(ed25519.PublicKey).Equal(ed25519.PublicKey(wantPub)) {
-		return nil, fmt.Errorf("private jwk %q: x does not match the public key derived from d", k.Kid)
+		return nil, fmt.Errorf(`private jwk %q: x does not match the public key derived from d (the key file may be corrupted or was hand-edited; regenerate it with "dedi-cli keygen")`, k.Kid)
 	}
 	return priv, nil
 }
