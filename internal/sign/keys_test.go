@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -117,6 +118,10 @@ func TestSaveLoadPrivateJWK_RoundTrip(t *testing.T) {
 }
 
 func TestSavePrivateJWK_FileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file mode bits are not meaningful on Windows")
+	}
+
 	k, err := GenerateKey("test-1")
 	if err != nil {
 		t.Fatalf("GenerateKey() error = %v", err)
