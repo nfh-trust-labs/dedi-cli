@@ -141,6 +141,3 @@ dedi-cli verify --in signed.json --key trusted_key_pub.json
   far as parsing into Go structs, which is lenient in exactly the ways JSON
   Schema is strict (e.g. a typo'd `type` or an extra unknown property is
   silently accepted).
-- Cross-file trust-chain checks (is this file's key actually listed in a
-  verified manifest?), domain-binding, and freshness/expiry — these need a
-  live crawl context (`verify` only checks the signature itself).
