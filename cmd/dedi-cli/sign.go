@@ -1,17 +1,25 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/nfh-trust-labs/dedi-cli/internal/protocol"
 	"github.com/nfh-trust-labs/dedi-cli/internal/sign"
 	"github.com/nfh-trust-labs/dedi-cli/internal/validate"
 	"github.com/spf13/cobra"
+)
+
+const (
+	schemaFetchTimeout  = 10 * time.Second
+	schemaFetchMaxBytes = 1 << 20 // 1 MiB
 )
 
 func newSignCmd() *cobra.Command {
@@ -29,13 +37,17 @@ file's "publisher.key") if it isn't there yet, then adds "proof". Manifest
 vs. DeDi file is auto-detected from shape.
 
 Before signing a DeDi file, records[].details is validated against the
-registry's inline schema (a URL-referenced schema can't be checked locally
-and is skipped automatically). Pass --skip-validation to sign anyway.
+registry's schema. If the schema is inline, it's used directly; if it's a
+URL reference, sign fetches it with a single GET request (10s timeout, 1MiB
+limit) — the only network access this tool ever makes, and only for this.
+A fetch failure is treated the same as a validation failure: pass
+--skip-validation to sign anyway.
 
 If --in is a directory, every top-level *.json file in it is signed with
 the same key and written to --out (which must then also be a directory,
-created if needed). Batch mode is not transactional: if one file fails,
-earlier files already written to --out remain on disk.`,
+created if needed). This is best-effort: every file is attempted even if
+some fail, a summary is printed at the end, and the command exits non-zero
+if any file failed.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if keyPath == "" || inPath == "" || outPath == "" {
 				return fmt.Errorf("--key, --in, and --out are all required")
@@ -73,12 +85,23 @@ earlier files already written to --out remain on disk.`,
 			if err != nil {
 				return fmt.Errorf("list --in: %w", err)
 			}
+
+			w := cmd.OutOrStdout()
+			failed := 0
 			for _, match := range matches {
 				dst := filepath.Join(outPath, filepath.Base(match))
-				if err := signFile(cmd.OutOrStdout(), match, dst, key, priv, skipValidation); err != nil {
-					return fmt.Errorf("sign %s: %w", match, err)
+				if err := signFile(w, match, dst, key, priv, skipValidation); err != nil {
+					failed++
+					fmt.Fprintf(w, "FAILED %s: %v\n", match, err)
 				}
 			}
+
+			fmt.Fprintf(w, "\n%d of %d files signed", len(matches)-failed, len(matches))
+			if failed > 0 {
+				fmt.Fprintf(w, ", %d failed\n", failed)
+				return fmt.Errorf("%d of %d files failed to sign", failed, len(matches))
+			}
+			fmt.Fprintln(w)
 			return nil
 		},
 	}
@@ -86,7 +109,7 @@ earlier files already written to --out remain on disk.`,
 	cmd.Flags().StringVar(&keyPath, "key", "", "path to the private key JSON (required)")
 	cmd.Flags().StringVar(&inPath, "in", "", "path to the unsigned manifest/DeDi file JSON, or a directory of them (required)")
 	cmd.Flags().StringVar(&outPath, "out", "", "path to write the signed JSON to, or a directory when --in is a directory (required)")
-	cmd.Flags().BoolVar(&skipValidation, "skip-validation", false, "skip validating a DeDi file's records against its inline registry schema before signing")
+	cmd.Flags().BoolVar(&skipValidation, "skip-validation", false, "skip validating a DeDi file's records against its registry schema before signing")
 	return cmd
 }
 
@@ -148,18 +171,25 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 }
 
 // validateBeforeSigning checks f.Records against f.Registry.Schema, unless
-// the schema is a URL reference (can't be resolved without network access —
-// skipped automatically) or skipValidation is set (skipped on request).
+// skipValidation is set. If the schema is a URL reference, it's fetched
+// first (the only network access sign ever makes).
 func validateBeforeSigning(w io.Writer, f *protocol.DeDiFile, skipValidation bool) error {
-	if f.Registry.Schema.IsURL() {
-		fmt.Fprintf(w, "registry.schema is a URL reference (%s) — skipping schema validation (no network access); verify manually if needed.\n", f.Registry.Schema.URL)
-		return nil
-	}
 	if skipValidation {
 		fmt.Fprintf(w, "schema validation skipped for registry %q (--skip-validation).\n", f.Registry.Name)
 		return nil
 	}
-	schema, err := validate.CompileInlineSchema(f.Registry.Schema.Inline)
+
+	inlineSchema := f.Registry.Schema.Inline
+	if f.Registry.Schema.IsURL() {
+		fmt.Fprintf(w, "fetching registry.schema from %s for validation...\n", f.Registry.Schema.URL)
+		fetched, err := fetchSchema(f.Registry.Schema.URL)
+		if err != nil {
+			return fmt.Errorf("fetch registry.schema from %s: %w (pass --skip-validation to sign without validating)", f.Registry.Schema.URL, err)
+		}
+		inlineSchema = fetched
+	}
+
+	schema, err := validate.CompileInlineSchema(inlineSchema)
 	if err != nil {
 		return fmt.Errorf("schema validation failed: %w (pass --skip-validation to sign anyway)", err)
 	}
@@ -167,6 +197,37 @@ func validateBeforeSigning(w io.Writer, f *protocol.DeDiFile, skipValidation boo
 		return fmt.Errorf("schema validation failed: %w (pass --skip-validation to sign anyway)", err)
 	}
 	return nil
+}
+
+// fetchSchema retrieves a URL-referenced JSON Schema, capped at
+// schemaFetchTimeout/schemaFetchMaxBytes so a slow or oversized response
+// can't hang or balloon sign's memory use.
+func fetchSchema(url string) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), schemaFetchTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, schemaFetchMaxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if len(body) > schemaFetchMaxBytes {
+		return nil, fmt.Errorf("response exceeds %d byte limit", schemaFetchMaxBytes)
+	}
+	return json.RawMessage(body), nil
 }
 
 type documentKind string

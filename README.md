@@ -2,8 +2,9 @@
 
 `dedi-cli` generates Ed25519 keypairs, signs DeDi manifests/files, and locally
 verifies signatures — for a publisher who wants to sign and check their own
-DeDi files by hand, without needing the [DeDi crawler](https://github.com/nfh-trust-labs/dedi-crawler)
-or any network access.
+DeDi files by hand, without needing the [DeDi crawler](https://github.com/nfh-trust-labs/dedi-crawler).
+The only network access it ever makes is `sign` fetching a URL-referenced
+registry schema for validation — see "Schema validation" below.
 
 ## Install
 
@@ -59,17 +60,21 @@ key and `proof`:
 **Schema validation.** Before signing a DeDi file, `sign` validates
 `records[].details` against the registry's `schema`:
 
-- If `registry.schema` is an inline JSON Schema object, every record is
-  validated against it. A violation fails the command with an error naming
-  the offending record and reminding you how to bypass it:
+- If `registry.schema` is an inline JSON Schema object, it's used directly.
+- If `registry.schema` is a URL reference, `sign` fetches it with a single
+  `GET` request (10s timeout, 1MiB response limit) — the only network access
+  this tool ever makes, and only when there's a URL schema to resolve. A
+  fetch failure (network error, non-`200`, oversized response) is treated the
+  same as a validation failure: it blocks signing unless you pass
+  `--skip-validation`.
+- Either way, every record is then validated against the resolved schema. A
+  violation fails the command with an error naming the offending record and
+  reminding you how to bypass it:
   `schema validation failed: record "r1": ... (pass --skip-validation to sign anyway)`.
-- If `registry.schema` is a URL reference, it can't be resolved without
-  network access, so validation is skipped automatically with a printed
-  notice — verify the records against that schema yourself before signing.
-- Pass `--skip-validation` to skip inline-schema validation on purpose (e.g.
-  you've already validated elsewhere). This does not validate the envelope
-  itself (unknown fields, enum values, etc.) — only `records[].details`
-  against `registry.schema`.
+- Pass `--skip-validation` to skip validation entirely — inline or
+  URL-referenced, and skips the network fetch too. This does not validate the
+  envelope itself (unknown fields, enum values, etc.) — only
+  `records[].details` against `registry.schema`.
 
 **Batch mode.** If `--in` is a directory, every top-level `*.json` file in it
 (non-recursive) is signed with the same `--key` and written to `--out`, which
@@ -80,8 +85,11 @@ preserving filenames:
 dedi-cli sign --key key.json --in unsigned/ --out signed/
 ```
 
-Batch mode is **not transactional**: if one file fails partway through, files
-already written to `--out` before the failure remain on disk.
+Batch mode is **best-effort**: every file is attempted even if some fail, a
+`FAILED <file>: <reason>` line is printed for each failure as it happens, and
+a summary (`N of M files signed`) prints at the end. The command exits
+non-zero if any file failed, but every file that *could* be signed still is —
+one bad file doesn't block the rest of the batch.
 
 ## verify
 
@@ -124,9 +132,9 @@ dedi-cli verify --in signed.json --key trusted_key_pub.json
 - A `publish` subcommand — writing to `.well-known/dedi.index.json` and
   hosting it is a real operational workflow, a different problem than
   signing.
-- Resolving and validating against a URL-referenced `registry.schema` — this
-  tool makes no network calls; `sign` skips it automatically and `verify`
-  doesn't check schemas at all.
+- Schema validation in `verify` — `verify` only checks the signature itself,
+  never `records[].details` against `registry.schema` (that only happens in
+  `sign`, before the document exists in signed form).
 - Validating that the unsigned input itself structurally conforms to the
   protocol's own manifest/DeDi file envelope schemas (`additionalProperties:
   false`, required fields, enums like `type`/`state`) — `sign` only goes as
