@@ -1,0 +1,25 @@
+// Command dedi-cli generates Ed25519 keys, signs, and locally verifies
+// DeDi protocol manifests and files.
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+)
+
+func main() {
+	root := &cobra.Command{
+		Use:   "dedi-cli",
+		Short: "Generate keys, sign, and verify DeDi protocol manifests and files",
+	}
+	root.AddCommand(newKeygenCmd())
+	root.AddCommand(newSignCmd())
+	root.AddCommand(newVerifyCmd())
+
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
