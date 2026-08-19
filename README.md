@@ -14,7 +14,8 @@ go install github.com/nfh-trust-labs/dedi-cli/cmd/dedi-cli@latest
 
 (Requires Go.) Pre-built binaries for linux/darwin/windows (amd64/arm64) are
 published on the [Releases page](https://github.com/nfh-trust-labs/dedi-cli/releases)
-for each tagged version.
+for each tagged version. ("darwin" is macOS — pick the `darwin_arm64` archive
+for Apple Silicon Macs, `darwin_amd64` for Intel ones.)
 
 Or build from a clone:
 
