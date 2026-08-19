@@ -2,6 +2,8 @@ module github.com/nfh-trust-labs/dedi-cli
 
 go 1.25.0
 
+toolchain go1.25.13
+
 require (
 	github.com/gowebpki/jcs v1.0.1
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
