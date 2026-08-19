@@ -17,6 +17,17 @@ published on the [Releases page](https://github.com/nfh-trust-labs/dedi-cli/rele
 for each tagged version. ("darwin" is macOS — pick the `darwin_arm64` archive
 for Apple Silicon Macs, `darwin_amd64` for Intel ones.)
 
+**Running a downloaded binary.** After extracting the archive:
+
+- macOS: these binaries aren't signed/notarized, so Gatekeeper blocks the
+  first run ("cannot be opened because the developer cannot be verified").
+  Clear it once with `xattr -d com.apple.quarantine dedi-cli`.
+- Linux/macOS: make sure it's executable — `chmod +x dedi-cli`.
+- Optionally move it onto your `PATH` (e.g. `mv dedi-cli /usr/local/bin/`) so
+  you can run `dedi-cli` from anywhere instead of `./dedi-cli`.
+
+Confirm it worked: `dedi-cli --version`.
+
 Or build from a clone:
 
 ```
