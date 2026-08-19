@@ -12,8 +12,9 @@ registry schema for validation — see "Schema validation" below.
 go install github.com/nfh-trust-labs/dedi-cli/cmd/dedi-cli@latest
 ```
 
-(Requires Go. Pre-built binaries aren't published yet — that's a planned
-follow-up.)
+(Requires Go.) Pre-built binaries for linux/darwin/windows (amd64/arm64) are
+published on the [Releases page](https://github.com/nfh-trust-labs/dedi-cli/releases)
+for each tagged version.
 
 Or build from a clone:
 
