@@ -14,7 +14,7 @@ import (
 //	go build -ldflags "-X main.version=v1.2.3"
 var version = "dev"
 
-func main() {
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:     "dedi-cli",
 		Short:   "Generate keys, sign, and verify DeDi protocol manifests and files",
@@ -23,8 +23,11 @@ func main() {
 	root.AddCommand(newKeygenCmd())
 	root.AddCommand(newSignCmd())
 	root.AddCommand(newVerifyCmd())
+	return root
+}
 
-	if err := root.Execute(); err != nil {
+func main() {
+	if err := newRootCmd().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
