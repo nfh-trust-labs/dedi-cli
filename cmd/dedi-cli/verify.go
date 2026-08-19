@@ -101,7 +101,7 @@ already trust instead.`,
 			fmt.Fprintf(w, "OK: %s signature is valid (kid=%s)\n", kind, kid)
 			if !usedTrustedKey {
 				fmt.Fprintln(w, "note: verified against the key embedded in the document itself — this proves")
-				fmt.Fprintln(w, "internal consistency, not that the key is trusted. Pass --key to check against")
+				fmt.Fprintln(w, "internal consistency. Pass --key if you want to check against")
 				fmt.Fprintln(w, "a key you already trust.")
 			}
 			return nil
