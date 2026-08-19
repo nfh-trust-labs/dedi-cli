@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-`dedi-cli` does not yet have tagged releases ([#2](https://github.com/nfh-trust-labs/dedi-cli/issues/2)); only the latest commit on `main` is supported.
+Only the most recent tagged release is supported — or, if none exists yet, the latest commit on `main`.
 
 ## Reporting a vulnerability
 
