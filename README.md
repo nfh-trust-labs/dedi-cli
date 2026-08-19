@@ -2,7 +2,7 @@
 
 `dedi-cli` generates Ed25519 keypairs, signs DeDi manifests/files, and locally
 verifies signatures — for a publisher who wants to sign and check their own
-DeDi files by hand, without needing the [DeDi crawler](https://github.com/nfh-trust-labs/dedi-crawler).
+DeDi files by hand as per [DeDi protocol](https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/docs/publishing-dedi-files.md) specifications.
 The only network access it ever makes is `sign` fetching a URL-referenced
 registry schema for validation — see "Schema validation" below.
 
