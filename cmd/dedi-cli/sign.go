@@ -133,6 +133,7 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 		if err != nil {
 			return fmt.Errorf("parse manifest: %w", err)
 		}
+		warnIfNotFuture(w, documentKindManifest, m.NextUpdate)
 		if err := sign.EnsureManifestKey(m, key.PublicKey()); err != nil {
 			return fmt.Errorf("key: %w", err)
 		}
@@ -148,6 +149,7 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 		if err != nil {
 			return fmt.Errorf("parse dedi file: %w", err)
 		}
+		warnIfNotFuture(w, documentKindDeDiFile, f.NextUpdate)
 		if err := validateBeforeSigning(w, f, skipValidation); err != nil {
 			return err
 		}
@@ -199,6 +201,16 @@ func validateBeforeSigning(w io.Writer, f *protocol.DeDiFile, skipValidation boo
 	return nil
 }
 
+// warnIfNotFuture prints a warning to w if nextUpdate is not strictly in
+// the future — such a document may not be picked up downstream until its
+// next_update is refreshed.
+func warnIfNotFuture(w io.Writer, kind documentKind, nextUpdate time.Time) {
+	if !nextUpdate.After(time.Now()) {
+		fmt.Fprintf(w, "warning: %s next_update (%s) is not in the future — it may not be picked up until updated\n",
+			kind, nextUpdate.Format(time.RFC3339))
+	}
+}
+
 // fetchSchema retrieves a URL-referenced JSON Schema, capped at
 // schemaFetchTimeout/schemaFetchMaxBytes so a slow or oversized response
 // can't hang or balloon sign's memory use.
@@ -247,7 +259,7 @@ const (
 func detectDocumentKind(raw []byte) (documentKind, error) {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &probe); err != nil {
-		return "", fmt.Errorf("parse input: %w", err)
+		return "", fmt.Errorf("parse input: %w", protocol.WrapJSONError(raw, err))
 	}
 	_, hasDomain := probe["domain"]
 	_, hasPublisher := probe["publisher"]

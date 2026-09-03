@@ -54,7 +54,7 @@ type Record struct {
 func ParseDeDiFile(raw []byte) (*DeDiFile, error) {
 	var f DeDiFile
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("parse dedi file: %w", err)
+		return nil, fmt.Errorf("parse dedi file: %w", WrapJSONError(raw, err))
 	}
 	return &f, nil
 }

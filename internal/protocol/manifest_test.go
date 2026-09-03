@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -104,8 +105,12 @@ func TestManifest_MarshalUnmarshalRoundTrip(t *testing.T) {
 }
 
 func TestParseManifest_MalformedJSON(t *testing.T) {
-	if _, err := ParseManifest([]byte(`{not valid`)); err == nil {
+	_, err := ParseManifest([]byte(`{not valid`))
+	if err == nil {
 		t.Fatal("expected error for malformed JSON")
+	}
+	if !strings.Contains(err.Error(), "line 1, column") {
+		t.Errorf("ParseManifest() error = %q, want it to mention a line/column", err.Error())
 	}
 }
 

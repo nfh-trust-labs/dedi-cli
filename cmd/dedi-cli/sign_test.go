@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -41,6 +42,16 @@ func TestDetectDocumentKind(t *testing.T) {
 				t.Errorf("detectDocumentKind() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectDocumentKind_MalformedJSONIncludesLocation(t *testing.T) {
+	_, err := detectDocumentKind([]byte("{\n  not json\n}"))
+	if err == nil {
+		t.Fatal("detectDocumentKind() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "line 2, column") {
+		t.Errorf("detectDocumentKind() error = %q, want it to mention line 2", err.Error())
 	}
 }
 
@@ -141,6 +152,98 @@ func TestSign_DeDiFile_SchemaValidation(t *testing.T) {
 			t.Fatalf("sign --skip-validation error = %v", err)
 		}
 	})
+}
+
+// dedFileWithNextUpdate is like unsignedDeDiFileJSON but with next_update
+// set to nextUpdate, for tests exercising the past-next_update warning.
+func dedFileWithNextUpdate(nextUpdate string) []byte {
+	return []byte(fmt.Sprintf(`{
+		"dedi_version": "0.1",
+		"type": "dedi-file",
+		"source_url": "https://example.org/.well-known/dedi.index.json",
+		"next_update": %q,
+		"publisher": {"domain": "example.org"},
+		"namespace": "example.org",
+		"registry": {
+			"name": "trust-anchors",
+			"schema": {"type":"object","required":["anchor_id"],"properties":{"anchor_id":{"type":"string"}}},
+			"state": "live",
+			"updated_at": "2026-07-01T09:00:00Z"
+		},
+		"records": [
+			{"record_name": "lfdt-root", "details": {"anchor_id": "example.org:lfdt-root"}}
+		]
+	}`, nextUpdate))
+}
+
+// manifestWithNextUpdate is like unsignedManifestJSON but with next_update
+// set to nextUpdate.
+func manifestWithNextUpdate(nextUpdate string) []byte {
+	return []byte(fmt.Sprintf(`{
+		"dedi_version": "0.1",
+		"domain": "example.org",
+		"keys": [],
+		"updated_at": "2026-07-01T09:00:00Z",
+		"next_update": %q,
+		"files": []
+	}`, nextUpdate))
+}
+
+func TestSign_DeDiFile_PastNextUpdate(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, dedFileWithNextUpdate("2020-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+	if err != nil {
+		t.Fatalf("sign error = %v", err)
+	}
+	if !strings.Contains(output, "warning:") || !strings.Contains(output, "next_update") {
+		t.Errorf("output = %q, want a next_update warning", output)
+	}
+	if _, statErr := os.Stat(out); statErr != nil {
+		t.Errorf("--out was not written despite next_update only being a warning: %v", statErr)
+	}
+}
+
+func TestSign_DeDiFile_FutureNextUpdate_NoWarning(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, dedFileWithNextUpdate("2099-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+	if err != nil {
+		t.Fatalf("sign error = %v", err)
+	}
+	if strings.Contains(output, "warning:") {
+		t.Errorf("output = %q, want no next_update warning for a future date", output)
+	}
+}
+
+func TestSign_Manifest_PastNextUpdate(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, manifestWithNextUpdate("2020-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+	if err != nil {
+		t.Fatalf("sign error = %v", err)
+	}
+	if !strings.Contains(output, "warning:") || !strings.Contains(output, "next_update") {
+		t.Errorf("output = %q, want a next_update warning", output)
+	}
 }
 
 func TestSign_DeDiFile_URLSchema(t *testing.T) {
