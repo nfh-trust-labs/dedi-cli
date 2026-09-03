@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nfh-trust-labs/dedi-cli/internal/protocol"
 )
@@ -189,7 +190,7 @@ func manifestWithNextUpdate(nextUpdate string) []byte {
 	}`, nextUpdate))
 }
 
-func TestSign_DeDiFile_PastNextUpdate(t *testing.T) {
+func TestSign_DeDiFile_PastNextUpdate_FailsWithoutForce(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := generateKeyFile(t, dir, "key-1")
 	in := filepath.Join(dir, "in.json")
@@ -198,12 +199,52 @@ func TestSign_DeDiFile_PastNextUpdate(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
+	_, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+	if err == nil || !strings.Contains(err.Error(), "in the past") || !strings.Contains(err.Error(), "--force") {
+		t.Errorf("err = %v, want a past-next_update error mentioning --force", err)
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Error("--out was written despite next_update being in the past")
+	}
+}
+
+func TestSign_DeDiFile_PastNextUpdate_SucceedsWithForce(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, dediFileWithNextUpdate("2020-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out, "--force")
+	if err != nil {
+		t.Fatalf("sign --force error = %v", err)
+	}
+	if !strings.Contains(output, "warning:") || !strings.Contains(output, "in the past") {
+		t.Errorf("output = %q, want a past-next_update warning", output)
+	}
+	if _, statErr := os.Stat(out); statErr != nil {
+		t.Errorf("--out was not written despite --force: %v", statErr)
+	}
+}
+
+func TestSign_DeDiFile_NextUpdateExpiringSoon_Warns(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	soon := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
+	if err := os.WriteFile(in, dediFileWithNextUpdate(soon), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
 	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
 	if err != nil {
 		t.Fatalf("sign error = %v", err)
 	}
-	if !strings.Contains(output, "warning:") || !strings.Contains(output, "next_update") {
-		t.Errorf("output = %q, want a next_update warning", output)
+	if !strings.Contains(output, "warning:") || !strings.Contains(output, "refreshed again soon") {
+		t.Errorf("output = %q, want an expiring-soon warning", output)
 	}
 	if _, statErr := os.Stat(out); statErr != nil {
 		t.Errorf("--out was not written despite next_update only being a warning: %v", statErr)
@@ -224,11 +265,11 @@ func TestSign_DeDiFile_FutureNextUpdate_NoWarning(t *testing.T) {
 		t.Fatalf("sign error = %v", err)
 	}
 	if strings.Contains(output, "warning:") {
-		t.Errorf("output = %q, want no next_update warning for a future date", output)
+		t.Errorf("output = %q, want no next_update warning for a comfortably future date", output)
 	}
 }
 
-func TestSign_Manifest_PastNextUpdate(t *testing.T) {
+func TestSign_Manifest_PastNextUpdate_FailsWithoutForce(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := generateKeyFile(t, dir, "key-1")
 	in := filepath.Join(dir, "in.json")
@@ -237,12 +278,27 @@ func TestSign_Manifest_PastNextUpdate(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
-	if err != nil {
-		t.Fatalf("sign error = %v", err)
+	_, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+	if err == nil || !strings.Contains(err.Error(), "in the past") || !strings.Contains(err.Error(), "--force") {
+		t.Errorf("err = %v, want a past-next_update error mentioning --force", err)
 	}
-	if !strings.Contains(output, "warning:") || !strings.Contains(output, "next_update") {
-		t.Errorf("output = %q, want a next_update warning", output)
+}
+
+func TestSign_Manifest_PastNextUpdate_SucceedsWithForce(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, manifestWithNextUpdate("2020-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out, "--force")
+	if err != nil {
+		t.Fatalf("sign --force error = %v", err)
+	}
+	if !strings.Contains(output, "warning:") || !strings.Contains(output, "in the past") {
+		t.Errorf("output = %q, want a past-next_update warning", output)
 	}
 }
 

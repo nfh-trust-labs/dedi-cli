@@ -5,9 +5,18 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/nfh-trust-labs/dedi-cli/internal/sign"
 )
+
+// farFutureNextUpdate returns an RFC3339 timestamp comfortably in the
+// future (relative to whenever the test runs, not a fixed date that will
+// eventually become the past) for fixtures that aren't specifically
+// exercising the next_update checks in sign.go.
+func farFutureNextUpdate() string {
+	return time.Now().AddDate(5, 0, 0).UTC().Format(time.RFC3339)
+}
 
 // runCLI executes a fresh root command with args, capturing combined
 // stdout/stderr. Each call gets its own command tree, so flag state never
@@ -43,14 +52,14 @@ func generateKeyFile(t *testing.T, dir, kid string) string {
 // signing key). Top-level "domain" with no "publisher" is what
 // detectDocumentKind sniffs as a manifest.
 func unsignedManifestJSON() []byte {
-	return []byte(`{
+	return []byte(fmt.Sprintf(`{
 		"dedi_version": "0.1",
 		"domain": "example.org",
 		"keys": [],
 		"updated_at": "2026-07-01T09:00:00Z",
-		"next_update": "2026-07-15T10:00:00Z",
+		"next_update": %q,
 		"files": []
-	}`)
+	}`, farFutureNextUpdate()))
 }
 
 // unsignedDeDiFileJSON returns a minimal unsigned DeDi file fixture with an
@@ -59,11 +68,11 @@ func unsignedManifestJSON() []byte {
 // fills it in during signing. Top-level "publisher" with no "domain" is what
 // detectDocumentKind sniffs as a DeDi file.
 func unsignedDeDiFileJSON() []byte {
-	return []byte(`{
+	return []byte(fmt.Sprintf(`{
 		"dedi_version": "0.1",
 		"type": "dedi-file",
 		"source_url": "https://example.org/.well-known/dedi.index.json",
-		"next_update": "2026-07-15T10:00:00Z",
+		"next_update": %q,
 		"publisher": {"domain": "example.org"},
 		"namespace": "example.org",
 		"registry": {
@@ -75,7 +84,7 @@ func unsignedDeDiFileJSON() []byte {
 		"records": [
 			{"record_name": "lfdt-root", "details": {"anchor_id": "example.org:lfdt-root"}}
 		]
-	}`)
+	}`, farFutureNextUpdate()))
 }
 
 // unsignedDeDiFileWithSchemaJSON is like unsignedDeDiFileJSON but with
@@ -88,7 +97,7 @@ func unsignedDeDiFileWithSchemaJSON(schemaRef, recordsJSON string) []byte {
 		"dedi_version": "0.1",
 		"type": "dedi-file",
 		"source_url": "https://example.org/.well-known/dedi.index.json",
-		"next_update": "2026-07-15T10:00:00Z",
+		"next_update": %q,
 		"publisher": {"domain": "example.org"},
 		"namespace": "example.org",
 		"registry": {
@@ -98,5 +107,5 @@ func unsignedDeDiFileWithSchemaJSON(schemaRef, recordsJSON string) []byte {
 			"updated_at": "2026-07-01T09:00:00Z"
 		},
 		"records": %s
-	}`, schemaRef, recordsJSON))
+	}`, farFutureNextUpdate(), schemaRef, recordsJSON))
 }

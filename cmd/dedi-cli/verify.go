@@ -52,7 +52,7 @@ already trust instead.`,
 			case documentKindManifest:
 				m, err := protocol.ParseManifest(raw)
 				if err != nil {
-					return fmt.Errorf("parse manifest: %w", err)
+					return err
 				}
 				k, found := findKeyByKid(m.Keys, m.Proof.VerificationMethod)
 				if !found {
@@ -62,7 +62,7 @@ already trust instead.`,
 			case documentKindDeDiFile:
 				f, err := protocol.ParseDeDiFile(raw)
 				if err != nil {
-					return fmt.Errorf("parse dedi file: %w", err)
+					return err
 				}
 				if f.Proof.VerificationMethod != f.Publisher.Key.Kid {
 					return fmt.Errorf("verification_method %q does not match publisher.key.kid %q (the document may be malformed or was hand-edited after signing)",
