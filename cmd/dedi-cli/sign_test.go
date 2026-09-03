@@ -154,9 +154,9 @@ func TestSign_DeDiFile_SchemaValidation(t *testing.T) {
 	})
 }
 
-// dedFileWithNextUpdate is like unsignedDeDiFileJSON but with next_update
+// dediFileWithNextUpdate is like unsignedDeDiFileJSON but with next_update
 // set to nextUpdate, for tests exercising the past-next_update warning.
-func dedFileWithNextUpdate(nextUpdate string) []byte {
+func dediFileWithNextUpdate(nextUpdate string) []byte {
 	return []byte(fmt.Sprintf(`{
 		"dedi_version": "0.1",
 		"type": "dedi-file",
@@ -194,7 +194,7 @@ func TestSign_DeDiFile_PastNextUpdate(t *testing.T) {
 	keyPath := generateKeyFile(t, dir, "key-1")
 	in := filepath.Join(dir, "in.json")
 	out := filepath.Join(dir, "out.json")
-	if err := os.WriteFile(in, dedFileWithNextUpdate("2020-01-01T00:00:00Z"), 0o644); err != nil {
+	if err := os.WriteFile(in, dediFileWithNextUpdate("2020-01-01T00:00:00Z"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -215,7 +215,7 @@ func TestSign_DeDiFile_FutureNextUpdate_NoWarning(t *testing.T) {
 	keyPath := generateKeyFile(t, dir, "key-1")
 	in := filepath.Join(dir, "in.json")
 	out := filepath.Join(dir, "out.json")
-	if err := os.WriteFile(in, dedFileWithNextUpdate("2099-01-01T00:00:00Z"), 0o644); err != nil {
+	if err := os.WriteFile(in, dediFileWithNextUpdate("2099-01-01T00:00:00Z"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
