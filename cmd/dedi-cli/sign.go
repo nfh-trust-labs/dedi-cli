@@ -172,7 +172,7 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 		if err := checkNextUpdate(w, documentKindDeDiFile, f.NextUpdate, force); err != nil {
 			return err
 		}
-		if err := validateBeforeSigning(w, f, skipValidation); err != nil {
+		if err := validateBeforeSigning(w, raw, f, skipValidation); err != nil {
 			return err
 		}
 		if err := sign.EnsurePublisherKey(f, key.PublicKey()); err != nil {
@@ -198,7 +198,9 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 // for a beckn_subscriber registry — each record's subscriber_id against
 // f.Publisher.Domain, unless skipValidation is set. If the schema is a URL
 // reference, it's fetched first (the only network access sign ever makes).
-func validateBeforeSigning(w io.Writer, f *protocol.DeDiFile, skipValidation bool) error {
+// raw is passed through only so a subscriber_id mismatch can be reported
+// with a "line N, column M" location.
+func validateBeforeSigning(w io.Writer, raw []byte, f *protocol.DeDiFile, skipValidation bool) error {
 	if skipValidation {
 		fmt.Fprintf(w, "validation skipped for registry %q (--skip-validation).\n", f.Registry.Name)
 		return nil
@@ -221,7 +223,7 @@ func validateBeforeSigning(w io.Writer, f *protocol.DeDiFile, skipValidation boo
 	if err := validate.ValidateRecords(f.Records, schema); err != nil {
 		return fmt.Errorf("schema validation failed: %w (pass --skip-validation to sign anyway)", err)
 	}
-	if err := validate.ValidateSubscriberIDs(f); err != nil {
+	if err := validate.ValidateSubscriberIDs(raw, f); err != nil {
 		return fmt.Errorf("subscriber_id validation failed: %w (pass --skip-validation to sign anyway)", err)
 	}
 	return nil

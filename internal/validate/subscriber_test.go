@@ -2,6 +2,7 @@ package validate
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/nfh-trust-labs/dedi-cli/internal/protocol"
@@ -24,21 +25,21 @@ func subscriberRecord(subscriberID string) protocol.Record {
 
 func TestValidateSubscriberIDs_ExactDomainMatch(t *testing.T) {
 	f := becknSubscriberFile("example.org", []protocol.Record{subscriberRecord("example.org")})
-	if err := ValidateSubscriberIDs(f); err != nil {
+	if err := ValidateSubscriberIDs(nil, f); err != nil {
 		t.Errorf("ValidateSubscriberIDs() error = %v, want nil", err)
 	}
 }
 
 func TestValidateSubscriberIDs_SubdomainMatch(t *testing.T) {
 	f := becknSubscriberFile("example.org", []protocol.Record{subscriberRecord("bap.example.org")})
-	if err := ValidateSubscriberIDs(f); err != nil {
+	if err := ValidateSubscriberIDs(nil, f); err != nil {
 		t.Errorf("ValidateSubscriberIDs() error = %v, want nil", err)
 	}
 }
 
 func TestValidateSubscriberIDs_Mismatch(t *testing.T) {
 	f := becknSubscriberFile("example.org", []protocol.Record{subscriberRecord("other.com")})
-	err := ValidateSubscriberIDs(f)
+	err := ValidateSubscriberIDs(nil, f)
 	if err == nil {
 		t.Fatal("expected a subscriber_id mismatch error")
 	}
@@ -48,21 +49,21 @@ func TestValidateSubscriberIDs_PrefixSquattingRejected(t *testing.T) {
 	// "evilexample.org" ends with "example.org" as a raw string suffix, but
 	// is not a dot-anchored subdomain of it — must be rejected.
 	f := becknSubscriberFile("example.org", []protocol.Record{subscriberRecord("evilexample.org")})
-	if err := ValidateSubscriberIDs(f); err == nil {
+	if err := ValidateSubscriberIDs(nil, f); err == nil {
 		t.Fatal("expected evilexample.org to be rejected as a match for example.org")
 	}
 }
 
 func TestValidateSubscriberIDs_CaseInsensitive(t *testing.T) {
 	f := becknSubscriberFile("Example.ORG", []protocol.Record{subscriberRecord("BAP.example.org")})
-	if err := ValidateSubscriberIDs(f); err != nil {
+	if err := ValidateSubscriberIDs(nil, f); err != nil {
 		t.Errorf("ValidateSubscriberIDs() error = %v, want nil", err)
 	}
 }
 
 func TestValidateSubscriberIDs_TrailingDot(t *testing.T) {
 	f := becknSubscriberFile("example.org.", []protocol.Record{subscriberRecord("example.org")})
-	if err := ValidateSubscriberIDs(f); err != nil {
+	if err := ValidateSubscriberIDs(nil, f); err != nil {
 		t.Errorf("ValidateSubscriberIDs() error = %v, want nil", err)
 	}
 }
@@ -75,7 +76,7 @@ func TestValidateSubscriberIDs_NonSubscriberSchemaURL_Skipped(t *testing.T) {
 		},
 		Records: []protocol.Record{subscriberRecord("totally-different.com")},
 	}
-	if err := ValidateSubscriberIDs(f); err != nil {
+	if err := ValidateSubscriberIDs(nil, f); err != nil {
 		t.Errorf("ValidateSubscriberIDs() error = %v, want nil for a non-beckn_subscriber schema", err)
 	}
 }
@@ -88,7 +89,7 @@ func TestValidateSubscriberIDs_InlineSchema_Skipped(t *testing.T) {
 		},
 		Records: []protocol.Record{subscriberRecord("totally-different.com")},
 	}
-	if err := ValidateSubscriberIDs(f); err != nil {
+	if err := ValidateSubscriberIDs(nil, f); err != nil {
 		t.Errorf("ValidateSubscriberIDs() error = %v, want nil for an inline schema", err)
 	}
 }
@@ -97,7 +98,7 @@ func TestValidateSubscriberIDs_EmptySubscriberID_Skipped(t *testing.T) {
 	f := becknSubscriberFile("example.org", []protocol.Record{
 		{RecordName: "r1", Details: json.RawMessage(`{}`)},
 	})
-	if err := ValidateSubscriberIDs(f); err != nil {
+	if err := ValidateSubscriberIDs(nil, f); err != nil {
 		t.Errorf("ValidateSubscriberIDs() error = %v, want nil when subscriber_id is absent", err)
 	}
 }
@@ -106,7 +107,51 @@ func TestValidateSubscriberIDs_MalformedDetails(t *testing.T) {
 	f := becknSubscriberFile("example.org", []protocol.Record{
 		{RecordName: "r1", Details: json.RawMessage(`not valid json`)},
 	})
-	if err := ValidateSubscriberIDs(f); err == nil {
+	if err := ValidateSubscriberIDs(nil, f); err == nil {
 		t.Fatal("expected an unmarshal error")
+	}
+}
+
+func TestValidateSubscriberIDs_MismatchIncludesLocation(t *testing.T) {
+	raw := []byte("{\n" +
+		`  "dedi_version": "0.1",` + "\n" +
+		`  "type": "dedi-file",` + "\n" +
+		`  "source_url": "https://example.org/dedi/dedi.subscribers.json",` + "\n" +
+		`  "next_update": "2099-01-01T00:00:00Z",` + "\n" +
+		`  "publisher": {"domain": "example.org"},` + "\n" +
+		`  "namespace": "example.org",` + "\n" +
+		`  "registry": {` + "\n" +
+		`    "name": "subscribers",` + "\n" +
+		`    "schema": "` + BecknSubscriberSchemaURL + `",` + "\n" +
+		`    "state": "live",` + "\n" +
+		`    "updated_at": "2026-07-01T09:00:00Z"` + "\n" +
+		"  },\n" +
+		`  "records": [` + "\n" +
+		`    {"record_name": "r1", "details": {"subscriber_id": "evil.com"}}` + "\n" +
+		"  ]\n" +
+		"}")
+
+	f, err := protocol.ParseDeDiFile(raw)
+	if err != nil {
+		t.Fatalf("ParseDeDiFile() error = %v", err)
+	}
+
+	err = ValidateSubscriberIDs(raw, f)
+	if err == nil {
+		t.Fatal("expected a subscriber_id mismatch error")
+	}
+	if !strings.Contains(err.Error(), "line 15, column") {
+		t.Errorf("error = %q, want it to mention line 15 (where the record is)", err.Error())
+	}
+}
+
+func TestValidateSubscriberIDs_MismatchWithNilRawOmitsLocation(t *testing.T) {
+	f := becknSubscriberFile("example.org", []protocol.Record{subscriberRecord("other.com")})
+	err := ValidateSubscriberIDs(nil, f)
+	if err == nil {
+		t.Fatal("expected a subscriber_id mismatch error")
+	}
+	if strings.Contains(err.Error(), "line") {
+		t.Errorf("error = %q, want no location when raw is unavailable", err.Error())
 	}
 }

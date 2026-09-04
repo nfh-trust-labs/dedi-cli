@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -37,7 +38,10 @@ type subscriberDetails struct {
 // a different or inline schema are skipped, as is any record with an empty
 // subscriber_id — presence and shape are schema validation's job, not this
 // check's.
-func ValidateSubscriberIDs(f *protocol.DeDiFile) error {
+//
+// raw is the original input bytes, used only to point a mismatch error at
+// a "line N, column M" location — the check itself runs entirely off f.
+func ValidateSubscriberIDs(raw []byte, f *protocol.DeDiFile) error {
 	if !f.Registry.Schema.IsURL() || f.Registry.Schema.URL != BecknSubscriberSchemaURL {
 		return nil
 	}
@@ -50,11 +54,32 @@ func ValidateSubscriberIDs(f *protocol.DeDiFile) error {
 			continue
 		}
 		if !subscriberIDMatchesDomain(d.SubscriberID, f.Publisher.Domain) {
-			return fmt.Errorf("record %q: subscriber_id %q does not match publisher domain %q (must be the domain itself or a subdomain of it)",
-				r.RecordName, d.SubscriberID, f.Publisher.Domain)
+			return fmt.Errorf("record %q%s: subscriber_id %q does not match publisher domain %q (must be the domain itself or a subdomain of it)",
+				r.RecordName, locationHint(raw, r.Details, d.SubscriberID), d.SubscriberID, f.Publisher.Domain)
 		}
 	}
 	return nil
+}
+
+// locationHint returns a " (line N, column M)" suffix pinpointing
+// subscriberID's quoted value within details inside raw, or "" if it can't
+// be located. Best-effort: json.RawMessage preserves the exact source
+// bytes it was decoded from, so bytes.Index reliably finds details' own
+// position in raw; a value needing JSON escaping (rare for a domain-shaped
+// subscriber_id) or a byte-for-byte duplicate details block elsewhere in
+// the file are the only ways this comes back empty or points at the wrong
+// occurrence.
+func locationHint(raw []byte, details json.RawMessage, subscriberID string) string {
+	base := bytes.Index(raw, details)
+	if base == -1 {
+		return ""
+	}
+	offset := base
+	if i := bytes.Index(details, []byte(`"`+subscriberID+`"`)); i != -1 {
+		offset = base + i
+	}
+	line, col := protocol.LineCol(raw, offset)
+	return fmt.Sprintf(" (line %d, column %d)", line, col)
 }
 
 // subscriberIDMatchesDomain reports whether id is exactly domain, or a

@@ -94,9 +94,12 @@ problem is — `line N, column M` — instead of leaving you to hunt for it.
 canonical `beckn_subscriber` schema URL, `sign` also checks every record's
 `subscriber_id`: it must be `publisher.domain` itself, or a subdomain of it
 (the same rule DeDi enforces at registration time — a record that fails it
-is silently never reflected in DeDi). A violation fails the command:
-`subscriber_id validation failed: record "r1": subscriber_id "..." does not
-match publisher domain "..." (pass --skip-validation to sign anyway)`.
+is silently never reflected in DeDi). A violation fails the command,
+naming the offending record and — best-effort — where its `subscriber_id`
+is in the input file:
+`subscriber_id validation failed: record "r1" (line 16, column 24):
+subscriber_id "..." does not match publisher domain "..." (pass
+--skip-validation to sign anyway)`.
 `--skip-validation` bypasses this check too. Registries referencing a
 different or inline schema are unaffected.
 
