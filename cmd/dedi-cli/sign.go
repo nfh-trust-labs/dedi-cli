@@ -48,6 +48,12 @@ limit) — the only network access this tool ever makes, and only for this.
 A fetch failure is treated the same as a validation failure: pass
 --skip-validation to sign anyway.
 
+For a beckn_subscriber registry specifically, each record's subscriber_id
+is also checked against publisher.domain: it must be that domain itself or
+a subdomain of it, the same rule DeDi enforces at registration time (a
+record that fails it is silently never reflected in DeDi). --skip-validation
+bypasses this check too.
+
 The manifest's (or file's) next_update is also checked: if it's already in
 the past, sign refuses to sign — such a document may silently not be picked
 up downstream — unless --force is passed. If it's in the future but within
@@ -120,7 +126,7 @@ if any file failed.`,
 	cmd.Flags().StringVar(&keyPath, "key", "", "path to the private key JSON (required)")
 	cmd.Flags().StringVar(&inPath, "in", "", "path to the unsigned manifest/DeDi file JSON, or a directory of them (required)")
 	cmd.Flags().StringVar(&outPath, "out", "", "path to write the signed JSON to, or a directory when --in is a directory (required)")
-	cmd.Flags().BoolVar(&skipValidation, "skip-validation", false, "skip validating a DeDi file's records against its registry schema before signing")
+	cmd.Flags().BoolVar(&skipValidation, "skip-validation", false, "skip validating a DeDi file's records against its registry schema (and, for beckn_subscriber, subscriber_id) before signing")
 	cmd.Flags().BoolVar(&force, "force", false, "sign even if next_update is already in the past")
 	return cmd
 }
@@ -166,7 +172,7 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 		if err := checkNextUpdate(w, documentKindDeDiFile, f.NextUpdate, force); err != nil {
 			return err
 		}
-		if err := validateBeforeSigning(w, f, skipValidation); err != nil {
+		if err := validateBeforeSigning(w, raw, f, skipValidation); err != nil {
 			return err
 		}
 		if err := sign.EnsurePublisherKey(f, key.PublicKey()); err != nil {
@@ -188,12 +194,15 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 	return nil
 }
 
-// validateBeforeSigning checks f.Records against f.Registry.Schema, unless
-// skipValidation is set. If the schema is a URL reference, it's fetched
-// first (the only network access sign ever makes).
-func validateBeforeSigning(w io.Writer, f *protocol.DeDiFile, skipValidation bool) error {
+// validateBeforeSigning checks f.Records against f.Registry.Schema, and —
+// for a beckn_subscriber registry — each record's subscriber_id against
+// f.Publisher.Domain, unless skipValidation is set. If the schema is a URL
+// reference, it's fetched first (the only network access sign ever makes).
+// raw is passed through only so a subscriber_id mismatch can be reported
+// with a "line N, column M" location.
+func validateBeforeSigning(w io.Writer, raw []byte, f *protocol.DeDiFile, skipValidation bool) error {
 	if skipValidation {
-		fmt.Fprintf(w, "schema validation skipped for registry %q (--skip-validation).\n", f.Registry.Name)
+		fmt.Fprintf(w, "validation skipped for registry %q (--skip-validation).\n", f.Registry.Name)
 		return nil
 	}
 
@@ -213,6 +222,9 @@ func validateBeforeSigning(w io.Writer, f *protocol.DeDiFile, skipValidation boo
 	}
 	if err := validate.ValidateRecords(f.Records, schema); err != nil {
 		return fmt.Errorf("schema validation failed: %w (pass --skip-validation to sign anyway)", err)
+	}
+	if err := validate.ValidateSubscriberIDs(raw, f); err != nil {
+		return fmt.Errorf("subscriber_id validation failed: %w (pass --skip-validation to sign anyway)", err)
 	}
 	return nil
 }
