@@ -311,13 +311,9 @@ func detectDocumentKind(raw []byte) (documentKind, error) {
 		return documentKindManifest, nil
 	case hasPublisher && !hasDomain:
 		return documentKindDeDiFile, nil
-	case hasDomain && hasPublisher:
-		return "", fmt.Errorf(`could not determine document type: input has both a top-level "domain" and a top-level "publisher", but it must be exactly one of:
-  - a DeDi manifest (top-level "domain", no "publisher") — see https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/schemas/dedi-manifest.schema.json
-  - a DeDi file (top-level "publisher", no "domain") — see https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/schemas/dedi-file.schema.json`)
 	default:
-		return "", fmt.Errorf(`could not determine document type: input has neither a top-level "domain" nor a top-level "publisher", but it must be exactly one of:
-  - a DeDi manifest (top-level "domain", no "publisher") — see https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/schemas/dedi-manifest.schema.json
-  - a DeDi file (top-level "publisher", no "domain") — see https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/schemas/dedi-file.schema.json`)
+		return "", fmt.Errorf(`could not determine document type: this doesn't look like either a manifest or a DeDi file
+  manifest schema:  https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/schemas/dedi-manifest.schema.json
+  dedi file schema: https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/schemas/dedi-file.schema.json`)
 	}
 }

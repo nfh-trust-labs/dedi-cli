@@ -57,18 +57,14 @@ func TestDetectDocumentKind_MalformedJSONIncludesLocation(t *testing.T) {
 	}
 }
 
-func TestDetectDocumentKind_BothAndNeitherHaveDistinctMessages(t *testing.T) {
+func TestDetectDocumentKind_UnmatchedShapeLinksBothSchemas(t *testing.T) {
 	_, bothErr := detectDocumentKind([]byte(`{"domain":"example.org","publisher":{}}`))
-	if bothErr == nil || !strings.Contains(bothErr.Error(), "has both") {
-		t.Errorf("both err = %v, want it to say \"has both\"", bothErr)
-	}
-
 	_, neitherErr := detectDocumentKind([]byte(`{"dedi_version":"0.1"}`))
-	if neitherErr == nil || !strings.Contains(neitherErr.Error(), "has neither") {
-		t.Errorf("neither err = %v, want it to say \"has neither\"", neitherErr)
-	}
 
 	for _, err := range []error{bothErr, neitherErr} {
+		if err == nil {
+			t.Fatal("detectDocumentKind() error = nil, want error")
+		}
 		if !strings.Contains(err.Error(), "dedi-manifest.schema.json") || !strings.Contains(err.Error(), "dedi-file.schema.json") {
 			t.Errorf("err = %v, want it to link both schema files", err)
 		}
