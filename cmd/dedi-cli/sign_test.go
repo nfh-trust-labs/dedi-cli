@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nfh-trust-labs/dedi-cli/internal/protocol"
+	"github.com/nfh-trust-labs/dedi-cli/internal/validate"
 )
 
 func TestDetectDocumentKind(t *testing.T) {
@@ -147,6 +148,72 @@ func TestSign_DeDiFile_SchemaValidation(t *testing.T) {
 		in := filepath.Join(dir, "skip-in.json")
 		out := filepath.Join(dir, "skip-out.json")
 		if err := os.WriteFile(in, unsignedDeDiFileWithSchemaJSON(inlineSchema, invalidRecords), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if _, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out, "--skip-validation"); err != nil {
+			t.Fatalf("sign --skip-validation error = %v", err)
+		}
+	})
+}
+
+// withBecknSubscriberSchemaURL points validate.BecknSubscriberSchemaURL at
+// url for the duration of the test, restoring it afterward — so a test can
+// make sign treat a local httptest.Server as "the" beckn_subscriber schema
+// without validateBeforeSigning's schema-fetch step ever touching the real
+// network.
+func withBecknSubscriberSchemaURL(t *testing.T, url string) {
+	t.Helper()
+	original := validate.BecknSubscriberSchemaURL
+	validate.BecknSubscriberSchemaURL = url
+	t.Cleanup(func() { validate.BecknSubscriberSchemaURL = original })
+}
+
+func TestSign_DeDiFile_SubscriberIDValidation(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"type":"object","required":["subscriber_id"]}`))
+	}))
+	defer srv.Close()
+	withBecknSubscriberSchemaURL(t, srv.URL)
+
+	subscriberSchemaRef := fmt.Sprintf("%q", srv.URL)
+	// unsignedDeDiFileWithSchemaJSON's fixture always sets publisher.domain
+	// to "example.org".
+	matchingRecords := `[{"record_name":"r1","details":{"subscriber_id":"bap.example.org"}}]`
+	mismatchedRecords := `[{"record_name":"r1","details":{"subscriber_id":"evil.com"}}]`
+
+	t.Run("matching subscriber_id passes", func(t *testing.T) {
+		in := filepath.Join(dir, "matching-in.json")
+		out := filepath.Join(dir, "matching-out.json")
+		if err := os.WriteFile(in, unsignedDeDiFileWithSchemaJSON(subscriberSchemaRef, matchingRecords), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if _, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out); err != nil {
+			t.Fatalf("sign error = %v", err)
+		}
+	})
+
+	t.Run("mismatched subscriber_id fails without --skip-validation", func(t *testing.T) {
+		in := filepath.Join(dir, "mismatched-in.json")
+		out := filepath.Join(dir, "mismatched-out.json")
+		if err := os.WriteFile(in, unsignedDeDiFileWithSchemaJSON(subscriberSchemaRef, mismatchedRecords), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		_, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+		if err == nil || !strings.Contains(err.Error(), "subscriber_id validation failed") {
+			t.Errorf("err = %v, want subscriber_id validation failure", err)
+		}
+		if _, statErr := os.Stat(out); statErr == nil {
+			t.Error("--out was written despite validation failure")
+		}
+	})
+
+	t.Run("mismatched subscriber_id passes with --skip-validation", func(t *testing.T) {
+		in := filepath.Join(dir, "mismatched-skip-in.json")
+		out := filepath.Join(dir, "mismatched-skip-out.json")
+		if err := os.WriteFile(in, unsignedDeDiFileWithSchemaJSON(subscriberSchemaRef, mismatchedRecords), 0o644); err != nil {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
 		if _, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out, "--skip-validation"); err != nil {
