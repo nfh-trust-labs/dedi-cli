@@ -20,11 +20,16 @@ import (
 const (
 	schemaFetchTimeout  = 10 * time.Second
 	schemaFetchMaxBytes = 1 << 20 // 1 MiB
+
+	// nextUpdateExpiringSoonWindow is how close to now next_update has to be
+	// (while still in the future) before sign warns that the document will
+	// need to be refreshed again soon.
+	nextUpdateExpiringSoonWindow = 48 * time.Hour
 )
 
 func newSignCmd() *cobra.Command {
 	var keyPath, inPath, outPath string
-	var skipValidation bool
+	var skipValidation, force bool
 
 	cmd := &cobra.Command{
 		Use:   "sign",
@@ -42,6 +47,12 @@ URL reference, sign fetches it with a single GET request (10s timeout, 1MiB
 limit) — the only network access this tool ever makes, and only for this.
 A fetch failure is treated the same as a validation failure: pass
 --skip-validation to sign anyway.
+
+The manifest's (or file's) next_update is also checked: if it's already in
+the past, sign refuses to sign — such a document may silently not be picked
+up downstream — unless --force is passed. If it's in the future but within
+48 hours, sign proceeds but warns that the document will need to be
+refreshed again soon.
 
 If --in is a directory, every top-level *.json file in it is signed with
 the same key and written to --out (which must then also be a directory,
@@ -68,7 +79,7 @@ if any file failed.`,
 			}
 
 			if !inInfo.IsDir() {
-				return signFile(cmd.OutOrStdout(), inPath, outPath, key, priv, skipValidation)
+				return signFile(cmd.OutOrStdout(), inPath, outPath, key, priv, skipValidation, force)
 			}
 
 			outInfo, err := os.Stat(outPath)
@@ -90,7 +101,7 @@ if any file failed.`,
 			failed := 0
 			for _, match := range matches {
 				dst := filepath.Join(outPath, filepath.Base(match))
-				if err := signFile(w, match, dst, key, priv, skipValidation); err != nil {
+				if err := signFile(w, match, dst, key, priv, skipValidation, force); err != nil {
 					failed++
 					fmt.Fprintf(w, "FAILED %s: %v\n", match, err)
 				}
@@ -110,12 +121,13 @@ if any file failed.`,
 	cmd.Flags().StringVar(&inPath, "in", "", "path to the unsigned manifest/DeDi file JSON, or a directory of them (required)")
 	cmd.Flags().StringVar(&outPath, "out", "", "path to write the signed JSON to, or a directory when --in is a directory (required)")
 	cmd.Flags().BoolVar(&skipValidation, "skip-validation", false, "skip validating a DeDi file's records against its registry schema before signing")
+	cmd.Flags().BoolVar(&force, "force", false, "sign even if next_update is already in the past")
 	return cmd
 }
 
 // signFile signs a single unsigned manifest/DeDi file at inPath and writes
 // the result to outPath.
-func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed25519.PrivateKey, skipValidation bool) error {
+func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed25519.PrivateKey, skipValidation, force bool) error {
 	raw, err := os.ReadFile(inPath)
 	if err != nil {
 		return fmt.Errorf("read input: %w", err)
@@ -131,7 +143,10 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 	case documentKindManifest:
 		m, err := protocol.ParseManifest(raw)
 		if err != nil {
-			return fmt.Errorf("parse manifest: %w", err)
+			return err
+		}
+		if err := checkNextUpdate(w, documentKindManifest, m.NextUpdate, force); err != nil {
+			return err
 		}
 		if err := sign.EnsureManifestKey(m, key.PublicKey()); err != nil {
 			return fmt.Errorf("key: %w", err)
@@ -146,7 +161,10 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 	case documentKindDeDiFile:
 		f, err := protocol.ParseDeDiFile(raw)
 		if err != nil {
-			return fmt.Errorf("parse dedi file: %w", err)
+			return err
+		}
+		if err := checkNextUpdate(w, documentKindDeDiFile, f.NextUpdate, force); err != nil {
+			return err
 		}
 		if err := validateBeforeSigning(w, f, skipValidation); err != nil {
 			return err
@@ -199,6 +217,31 @@ func validateBeforeSigning(w io.Writer, f *protocol.DeDiFile, skipValidation boo
 	return nil
 }
 
+// checkNextUpdate enforces that a document's next_update is not already in
+// the past — such a document may silently not be picked up downstream —
+// returning an error unless force is set (in which case it warns instead).
+// If next_update is in the future but within nextUpdateExpiringSoonWindow,
+// it warns rather than failing, since the document will need to be
+// refreshed again soon.
+func checkNextUpdate(w io.Writer, kind documentKind, nextUpdate time.Time, force bool) error {
+	remaining := time.Until(nextUpdate)
+
+	if remaining <= 0 {
+		msg := fmt.Sprintf("%s next_update (%s) is in the past — it will not be picked up until updated", kind, nextUpdate.Format(time.RFC3339))
+		if !force {
+			return fmt.Errorf("%s (pass --force to sign anyway)", msg)
+		}
+		fmt.Fprintf(w, "warning: %s (--force)\n", msg)
+		return nil
+	}
+
+	if remaining <= nextUpdateExpiringSoonWindow {
+		fmt.Fprintf(w, "warning: %s next_update (%s) is only %s away — this document will need to be refreshed again soon\n",
+			kind, nextUpdate.Format(time.RFC3339), remaining.Round(time.Minute))
+	}
+	return nil
+}
+
 // fetchSchema retrieves a URL-referenced JSON Schema, capped at
 // schemaFetchTimeout/schemaFetchMaxBytes so a slow or oversized response
 // can't hang or balloon sign's memory use.
@@ -247,7 +290,7 @@ const (
 func detectDocumentKind(raw []byte) (documentKind, error) {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &probe); err != nil {
-		return "", fmt.Errorf("parse input: %w", err)
+		return "", fmt.Errorf("parse input: %w", protocol.WrapJSONError(raw, err))
 	}
 	_, hasDomain := probe["domain"]
 	_, hasPublisher := probe["publisher"]

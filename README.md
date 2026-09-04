@@ -59,7 +59,8 @@ dedi-cli sign --key key.json --in unsigned.json --out signed.json
 Reads an unsigned manifest or DeDi file, auto-detecting which one from its
 shape (a top-level `domain` means a manifest, a top-level `publisher` means a
 DeDi file). The input should have every field filled in except the signing
-key and `proof`:
+key and `proof`. If the input isn't valid JSON, the error names where the
+problem is — `line N, column M` — instead of leaving you to hunt for it.
 
 - If the manifest's `keys` array (or the file's `publisher.key`) doesn't yet
   contain a key matching `--key`, `sign` adds it.
@@ -88,6 +89,19 @@ key and `proof`:
   URL-referenced, and skips the network fetch too. This does not validate the
   envelope itself (unknown fields, enum values, etc.) — only
   `records[].details` against `registry.schema`.
+
+**`next_update` freshness.** `sign` also checks the manifest's (or file's)
+own `next_update`:
+
+- If it's already in the past, `sign` refuses to sign — a document with a
+  past `next_update` may silently not be picked up downstream — with an
+  error naming the timestamp: `dedi file next_update (...) is in the past —
+  it will not be picked up until updated (pass --force to sign anyway)`.
+- Pass `--force` to sign it anyway; `sign` prints a warning instead of
+  failing.
+- If `next_update` is in the future but within 48 hours, `sign` proceeds but
+  prints a warning that the document will need to be refreshed again soon —
+  no flag needed for this case.
 
 **Batch mode.** If `--in` is a directory, every top-level `*.json` file in it
 (non-recursive) is signed with the same `--key` and written to `--out`, which

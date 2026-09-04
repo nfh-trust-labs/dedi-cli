@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nfh-trust-labs/dedi-cli/internal/protocol"
 )
@@ -41,6 +43,16 @@ func TestDetectDocumentKind(t *testing.T) {
 				t.Errorf("detectDocumentKind() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectDocumentKind_MalformedJSONIncludesLocation(t *testing.T) {
+	_, err := detectDocumentKind([]byte("{\n  not json\n}"))
+	if err == nil {
+		t.Fatal("detectDocumentKind() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "line 2, column") {
+		t.Errorf("detectDocumentKind() error = %q, want it to mention line 2", err.Error())
 	}
 }
 
@@ -141,6 +153,153 @@ func TestSign_DeDiFile_SchemaValidation(t *testing.T) {
 			t.Fatalf("sign --skip-validation error = %v", err)
 		}
 	})
+}
+
+// dediFileWithNextUpdate is like unsignedDeDiFileJSON but with next_update
+// set to nextUpdate, for tests exercising the past-next_update warning.
+func dediFileWithNextUpdate(nextUpdate string) []byte {
+	return []byte(fmt.Sprintf(`{
+		"dedi_version": "0.1",
+		"type": "dedi-file",
+		"source_url": "https://example.org/.well-known/dedi.index.json",
+		"next_update": %q,
+		"publisher": {"domain": "example.org"},
+		"namespace": "example.org",
+		"registry": {
+			"name": "trust-anchors",
+			"schema": {"type":"object","required":["anchor_id"],"properties":{"anchor_id":{"type":"string"}}},
+			"state": "live",
+			"updated_at": "2026-07-01T09:00:00Z"
+		},
+		"records": [
+			{"record_name": "lfdt-root", "details": {"anchor_id": "example.org:lfdt-root"}}
+		]
+	}`, nextUpdate))
+}
+
+// manifestWithNextUpdate is like unsignedManifestJSON but with next_update
+// set to nextUpdate.
+func manifestWithNextUpdate(nextUpdate string) []byte {
+	return []byte(fmt.Sprintf(`{
+		"dedi_version": "0.1",
+		"domain": "example.org",
+		"keys": [],
+		"updated_at": "2026-07-01T09:00:00Z",
+		"next_update": %q,
+		"files": []
+	}`, nextUpdate))
+}
+
+func TestSign_DeDiFile_PastNextUpdate_FailsWithoutForce(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, dediFileWithNextUpdate("2020-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+	if err == nil || !strings.Contains(err.Error(), "in the past") || !strings.Contains(err.Error(), "--force") {
+		t.Errorf("err = %v, want a past-next_update error mentioning --force", err)
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Error("--out was written despite next_update being in the past")
+	}
+}
+
+func TestSign_DeDiFile_PastNextUpdate_SucceedsWithForce(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, dediFileWithNextUpdate("2020-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out, "--force")
+	if err != nil {
+		t.Fatalf("sign --force error = %v", err)
+	}
+	if !strings.Contains(output, "warning:") || !strings.Contains(output, "in the past") {
+		t.Errorf("output = %q, want a past-next_update warning", output)
+	}
+	if _, statErr := os.Stat(out); statErr != nil {
+		t.Errorf("--out was not written despite --force: %v", statErr)
+	}
+}
+
+func TestSign_DeDiFile_NextUpdateExpiringSoon_Warns(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	soon := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
+	if err := os.WriteFile(in, dediFileWithNextUpdate(soon), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+	if err != nil {
+		t.Fatalf("sign error = %v", err)
+	}
+	if !strings.Contains(output, "warning:") || !strings.Contains(output, "refreshed again soon") {
+		t.Errorf("output = %q, want an expiring-soon warning", output)
+	}
+	if _, statErr := os.Stat(out); statErr != nil {
+		t.Errorf("--out was not written despite next_update only being a warning: %v", statErr)
+	}
+}
+
+func TestSign_DeDiFile_FutureNextUpdate_NoWarning(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, dediFileWithNextUpdate("2099-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+	if err != nil {
+		t.Fatalf("sign error = %v", err)
+	}
+	if strings.Contains(output, "warning:") {
+		t.Errorf("output = %q, want no next_update warning for a comfortably future date", output)
+	}
+}
+
+func TestSign_Manifest_PastNextUpdate_FailsWithoutForce(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, manifestWithNextUpdate("2020-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+	if err == nil || !strings.Contains(err.Error(), "in the past") || !strings.Contains(err.Error(), "--force") {
+		t.Errorf("err = %v, want a past-next_update error mentioning --force", err)
+	}
+}
+
+func TestSign_Manifest_PastNextUpdate_SucceedsWithForce(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, manifestWithNextUpdate("2020-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out, "--force")
+	if err != nil {
+		t.Fatalf("sign --force error = %v", err)
+	}
+	if !strings.Contains(output, "warning:") || !strings.Contains(output, "in the past") {
+		t.Errorf("output = %q, want a past-next_update warning", output)
+	}
 }
 
 func TestSign_DeDiFile_URLSchema(t *testing.T) {

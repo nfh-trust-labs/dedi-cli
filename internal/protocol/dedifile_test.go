@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -210,8 +211,12 @@ func TestParseDeDiFile_RegistryAndRecordWithDescriptionAndMeta(t *testing.T) {
 }
 
 func TestParseDeDiFile_MalformedJSON(t *testing.T) {
-	if _, err := ParseDeDiFile([]byte(`{not valid`)); err == nil {
+	_, err := ParseDeDiFile([]byte(`{not valid`))
+	if err == nil {
 		t.Fatal("expected error for malformed JSON")
+	}
+	if !strings.Contains(err.Error(), "line 1, column") {
+		t.Errorf("ParseDeDiFile() error = %q, want it to mention a line/column", err.Error())
 	}
 }
 

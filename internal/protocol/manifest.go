@@ -31,7 +31,7 @@ type Manifest struct {
 func ParseManifest(raw []byte) (*Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
+		return nil, fmt.Errorf("parse manifest: %w", WrapJSONError(raw, err))
 	}
 	return &m, nil
 }
