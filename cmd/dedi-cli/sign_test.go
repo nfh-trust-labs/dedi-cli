@@ -57,6 +57,20 @@ func TestDetectDocumentKind_MalformedJSONIncludesLocation(t *testing.T) {
 	}
 }
 
+func TestDetectDocumentKind_UnmatchedShapeLinksBothSchemas(t *testing.T) {
+	_, bothErr := detectDocumentKind([]byte(`{"domain":"example.org","publisher":{}}`))
+	_, neitherErr := detectDocumentKind([]byte(`{"dedi_version":"0.1"}`))
+
+	for _, err := range []error{bothErr, neitherErr} {
+		if err == nil {
+			t.Fatal("detectDocumentKind() error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "dedi-manifest.schema.json") || !strings.Contains(err.Error(), "dedi-file.schema.json") {
+			t.Errorf("err = %v, want it to link both schema files", err)
+		}
+	}
+}
+
 func TestSign_RequiredFlags(t *testing.T) {
 	_, err := runCLI(t, "sign", "--key", "k.json")
 	if err == nil || !strings.Contains(err.Error(), "--key, --in, and --out are all required") {

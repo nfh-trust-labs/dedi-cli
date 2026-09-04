@@ -312,6 +312,8 @@ func detectDocumentKind(raw []byte) (documentKind, error) {
 	case hasPublisher && !hasDomain:
 		return documentKindDeDiFile, nil
 	default:
-		return "", fmt.Errorf(`could not determine document type: expected exactly one of "domain" (manifest) or "publisher" (dedi file)`)
+		return "", fmt.Errorf(`could not determine document type: this doesn't look like either a manifest or a DeDi file
+  manifest schema:  https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/schemas/dedi-manifest.schema.json
+  dedi file schema: https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/schemas/dedi-file.schema.json`)
 	}
 }
