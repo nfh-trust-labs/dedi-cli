@@ -86,9 +86,27 @@ problem is — `line N, column M` — instead of leaving you to hunt for it.
   reminding you how to bypass it:
   `schema validation failed: record "r1": ... (pass --skip-validation to sign anyway)`.
 - Pass `--skip-validation` to skip validation entirely — inline or
-  URL-referenced, and skips the network fetch too. This does not validate the
-  envelope itself (unknown fields, enum values, etc.) — only
-  `records[].details` against `registry.schema`.
+  URL-referenced, and skips the network fetch too.
+
+**Envelope validation.** After signing, `sign` validates the resulting
+manifest or DeDi file against the protocol's own envelope schema
+([dedi-manifest.schema.json](https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/schemas/dedi-manifest.schema.json) /
+[dedi-file.schema.json](https://github.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/blob/main/schemas/dedi-file.schema.json),
+vendored copies embedded in the binary — this is the only structural check
+that applies to both document kinds):
+
+- Catches what parsing into Go structs can't: an unknown top-level field,
+  a missing required field, and enum/const violations (`registry.state`
+  must be `live`/`inactive`, `type` must match the document kind) that
+  survive unchanged into the signed output.
+- Runs on the *signed* document, not the raw input — both schemas require
+  `proof` (and a manifest requires a non-empty `keys`), which only exist
+  once signing has filled them in. This means a field `sign` doesn't
+  understand and silently drops from the raw input (rather than one that
+  passes through unchanged, like `registry.state`) won't be caught.
+- A violation fails the command: `envelope validation failed: ...
+  (pass --skip-validation to sign anyway)`. `--skip-validation` bypasses
+  this too, for both manifests and DeDi files.
 
 **`subscriber_id` validation.** When `registry.schema` is exactly the
 canonical `beckn_subscriber` schema URL, `sign` also checks every record's
@@ -175,9 +193,9 @@ dedi-cli verify --in signed.json --key trusted_key_pub.json
 - Schema validation in `verify` — `verify` only checks the signature itself,
   never `records[].details` against `registry.schema` (that only happens in
   `sign`, before the document exists in signed form).
-- Validating that the unsigned input itself structurally conforms to the
-  protocol's own manifest/DeDi file envelope schemas (`additionalProperties:
-  false`, required fields, enums like `type`/`state`) — `sign` only goes as
-  far as parsing into Go structs, which is lenient in exactly the ways JSON
-  Schema is strict (e.g. a typo'd `type` or an extra unknown property is
-  silently accepted).
+- Catching an unknown field in the *raw, unsigned* input specifically —
+  envelope validation (above) runs on the signed output, so a field `sign`
+  doesn't recognize is already silently dropped by Go's struct-based
+  parsing before that check ever sees it. A field the parser does
+  recognize and pass through unchanged (`registry.state`, `type`, etc.) is
+  still caught, since it survives into the signed output.
