@@ -159,7 +159,7 @@ func TestSign_DeDiFile_SchemaValidation(t *testing.T) {
 // withBecknSubscriberSchemaURL points validate.BecknSubscriberSchemaURL at
 // url for the duration of the test, restoring it afterward — so a test can
 // make sign treat a local httptest.Server as "the" beckn_subscriber schema
-// without validateBeforeSigning's schema-fetch step ever touching the real
+// without validateRecords's schema-fetch step ever touching the real
 // network.
 func withBecknSubscriberSchemaURL(t *testing.T, url string) {
 	t.Helper()
@@ -220,6 +220,104 @@ func TestSign_DeDiFile_SubscriberIDValidation(t *testing.T) {
 			t.Fatalf("sign --skip-validation error = %v", err)
 		}
 	})
+}
+
+// dediFileWithRegistryState is like unsignedDeDiFileJSON but with
+// registry.state set to state — a field sign passes through unchanged, so
+// an invalid value survives into the signed output and should be caught
+// by post-sign envelope validation (unlike registry.schema, which sign
+// does inspect).
+func dediFileWithRegistryState(state string) []byte {
+	return []byte(fmt.Sprintf(`{
+		"dedi_version": "0.1",
+		"type": "dedi-file",
+		"source_url": "https://example.org/.well-known/dedi.index.json",
+		"next_update": "2099-01-01T00:00:00Z",
+		"publisher": {"domain": "example.org"},
+		"namespace": "example.org",
+		"registry": {
+			"name": "trust-anchors",
+			"schema": {"type":"object","required":["anchor_id"],"properties":{"anchor_id":{"type":"string"}}},
+			"state": %q,
+			"updated_at": "2026-07-01T09:00:00Z"
+		},
+		"records": [
+			{"record_name": "lfdt-root", "details": {"anchor_id": "example.org:lfdt-root"}}
+		]
+	}`, state))
+}
+
+func TestSign_DeDiFile_EnvelopeValidation(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+
+	t.Run("valid registry.state passes", func(t *testing.T) {
+		in := filepath.Join(dir, "valid-in.json")
+		out := filepath.Join(dir, "valid-out.json")
+		if err := os.WriteFile(in, dediFileWithRegistryState("live"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if _, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out); err != nil {
+			t.Fatalf("sign error = %v", err)
+		}
+	})
+
+	t.Run("invalid registry.state fails without --skip-validation", func(t *testing.T) {
+		in := filepath.Join(dir, "invalid-in.json")
+		out := filepath.Join(dir, "invalid-out.json")
+		if err := os.WriteFile(in, dediFileWithRegistryState("not-a-real-state"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		_, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+		if err == nil || !strings.Contains(err.Error(), "envelope validation failed") {
+			t.Errorf("err = %v, want envelope validation failure", err)
+		}
+		if _, statErr := os.Stat(out); statErr == nil {
+			t.Error("--out was written despite validation failure")
+		}
+	})
+
+	t.Run("invalid registry.state passes with --skip-validation", func(t *testing.T) {
+		in := filepath.Join(dir, "skip-in.json")
+		out := filepath.Join(dir, "skip-out.json")
+		if err := os.WriteFile(in, dediFileWithRegistryState("not-a-real-state"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if _, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out, "--skip-validation"); err != nil {
+			t.Fatalf("sign --skip-validation error = %v", err)
+		}
+	})
+}
+
+func TestSign_Manifest_EnvelopeValidation(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := generateKeyFile(t, dir, "key-1")
+
+	// A manifest with an invalid "type" (must be const "dedi-manifest" if
+	// present) — sign doesn't touch this field, so it survives into the
+	// signed output.
+	invalidManifest := []byte(`{
+		"dedi_version": "0.1",
+		"type": "not-a-manifest",
+		"domain": "example.org",
+		"keys": [],
+		"updated_at": "2026-07-01T09:00:00Z",
+		"next_update": "2099-01-01T00:00:00Z",
+		"files": []
+	}`)
+
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(in, invalidManifest, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	_, err := runCLI(t, "sign", "--key", keyPath, "--in", in, "--out", out)
+	if err == nil || !strings.Contains(err.Error(), "envelope validation failed") {
+		t.Errorf("err = %v, want envelope validation failure", err)
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Error("--out was written despite validation failure")
+	}
 }
 
 // dediFileWithNextUpdate is like unsignedDeDiFileJSON but with next_update

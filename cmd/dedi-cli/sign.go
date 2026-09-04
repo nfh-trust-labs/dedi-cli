@@ -54,6 +54,11 @@ a subdomain of it, the same rule DeDi enforces at registration time (a
 record that fails it is silently never reflected in DeDi). --skip-validation
 bypasses this check too.
 
+After signing, the resulting manifest or DeDi file is validated against the
+protocol's own envelope schema (unknown fields, missing required fields,
+enum values like type/registry.state) — this applies to both document
+kinds. --skip-validation skips this too.
+
 The manifest's (or file's) next_update is also checked: if it's already in
 the past, sign refuses to sign — such a document may silently not be picked
 up downstream — unless --force is passed. If it's in the future but within
@@ -126,7 +131,7 @@ if any file failed.`,
 	cmd.Flags().StringVar(&keyPath, "key", "", "path to the private key JSON (required)")
 	cmd.Flags().StringVar(&inPath, "in", "", "path to the unsigned manifest/DeDi file JSON, or a directory of them (required)")
 	cmd.Flags().StringVar(&outPath, "out", "", "path to write the signed JSON to, or a directory when --in is a directory (required)")
-	cmd.Flags().BoolVar(&skipValidation, "skip-validation", false, "skip validating a DeDi file's records against its registry schema (and, for beckn_subscriber, subscriber_id) before signing")
+	cmd.Flags().BoolVar(&skipValidation, "skip-validation", false, "skip validating a DeDi file's records against its registry schema (and, for beckn_subscriber, subscriber_id), and skip validating the signed output against the protocol's envelope schema")
 	cmd.Flags().BoolVar(&force, "force", false, "sign even if next_update is already in the past")
 	return cmd
 }
@@ -142,6 +147,10 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 	kind, err := detectDocumentKind(raw)
 	if err != nil {
 		return err
+	}
+
+	if skipValidation {
+		fmt.Fprintf(w, "validation skipped for %s (--skip-validation).\n", kind)
 	}
 
 	var signedJSON []byte
@@ -172,8 +181,10 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 		if err := checkNextUpdate(w, documentKindDeDiFile, f.NextUpdate, force); err != nil {
 			return err
 		}
-		if err := validateBeforeSigning(w, raw, f, skipValidation); err != nil {
-			return err
+		if !skipValidation {
+			if err := validateRecords(w, raw, f); err != nil {
+				return err
+			}
 		}
 		if err := sign.EnsurePublisherKey(f, key.PublicKey()); err != nil {
 			return fmt.Errorf("key: %w", err)
@@ -187,6 +198,12 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 		}
 	}
 
+	if !skipValidation {
+		if err := validateEnvelope(signedJSON, kind); err != nil {
+			return err
+		}
+	}
+
 	if err := os.WriteFile(outPath, signedJSON, 0o644); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
@@ -194,18 +211,33 @@ func signFile(w io.Writer, inPath, outPath string, key sign.PrivateJWK, priv ed2
 	return nil
 }
 
-// validateBeforeSigning checks f.Records against f.Registry.Schema, and —
-// for a beckn_subscriber registry — each record's subscriber_id against
-// f.Publisher.Domain, unless skipValidation is set. If the schema is a URL
-// reference, it's fetched first (the only network access sign ever makes).
-// raw is passed through only so a subscriber_id mismatch can be reported
-// with a "line N, column M" location.
-func validateBeforeSigning(w io.Writer, raw []byte, f *protocol.DeDiFile, skipValidation bool) error {
-	if skipValidation {
-		fmt.Fprintf(w, "validation skipped for registry %q (--skip-validation).\n", f.Registry.Name)
-		return nil
+// validateEnvelope checks signedJSON — the final signed document — against
+// the protocol's own envelope schema for kind. Runs post-sign, not on the
+// raw input: both schemas require "proof" (and, for a manifest, "keys"
+// with minItems 1), which are only present once signing has filled them
+// in — validating the raw pre-sign input against these schemas would fail
+// on every invocation.
+func validateEnvelope(signedJSON []byte, kind documentKind) error {
+	var err error
+	switch kind {
+	case documentKindManifest:
+		err = validate.ValidateManifestEnvelope(signedJSON)
+	case documentKindDeDiFile:
+		err = validate.ValidateDeDiFileEnvelope(signedJSON)
 	}
+	if err != nil {
+		return fmt.Errorf("envelope validation failed: %w (pass --skip-validation to sign anyway)", err)
+	}
+	return nil
+}
 
+// validateRecords checks f.Records against f.Registry.Schema, and — for a
+// beckn_subscriber registry — each record's subscriber_id against
+// f.Publisher.Domain. If the schema is a URL reference, it's fetched first
+// (the only network access sign ever makes). raw is passed through only so
+// a subscriber_id mismatch can be reported with a "line N, column M"
+// location.
+func validateRecords(w io.Writer, raw []byte, f *protocol.DeDiFile) error {
 	inlineSchema := f.Registry.Schema.Inline
 	if f.Registry.Schema.IsURL() {
 		fmt.Fprintf(w, "fetching registry.schema from %s for validation...\n", f.Registry.Schema.URL)
